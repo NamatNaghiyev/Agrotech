@@ -18,6 +18,7 @@
 #define SERVER_URL "http://79.133.182.96:9090/api/store"  // Məlumatın göndərildiyi server
 #define PF "{\"temperature\": \"%.2f\", \"humidity\": \"%.2f\", \"soil\": \"%d\", \"bme_temperature\": \"%.2f\", \"bme_humidity\": \"%.2f\", \"pressure\": \"%.2f\", \"gas_resistance\": \"%.2f\", \"avg_temperature\": \"%.2f\", \"avg_humidity\": \"%.2f\"}"
 
+
 // === Sensor obyektləri ===
 DHT dht(DHTPIN, DHTTYPE);            // DHT sensor obyekti yaradılır
 Adafruit_BME680 bme;                 // BME680 sensor obyekti
@@ -97,9 +98,24 @@ void loop() {
   }
 
   // === Rütubətin vəziyyəti ===
-  Serial.print("💧 Rütubət (Orta): ");
-  Serial.print(ortaHum); Serial.print(" % ");
-  Serial.println((ortaHum < 30 || ortaHum > 60) ? "⚠ [Rütubət normaldan kənar!]" : "✅ [Rütubət normal]");
+  float h = dht.readHumidity();
+  String humidityStatus;
+
+  if (h < 30) {
+    humidityStatus = "Çox quru (0-30%) - Rütubət çox aşağıdır, bu halda bitkilər üçün kifayət qədər su təmin olunmur. Bitkilərin su itirməsi risklidir.";
+  } else if (h >= 30 && h < 50) {
+    humidityStatus = "Normal quru (30-50%) - Rütubət səviyyəsi orta səviyyədədir. Bitkilər üçün ideal şəraitdə deyil, amma hələ də böyüməyə imkan verir.";
+  } else if (h >= 50 && h < 70) {
+    humidityStatus = "Normal (50-70%) - Bitkilər üçün əla şərait. Bu rütubət səviyyəsi, əksər bitkilərin yaxşı inkişaf etməsi üçün idealdır.";
+  } else if (h >= 70 && h < 90) {
+    humidityStatus = "Yüksək rutubət (70-90%) - Çox yüksək rütubət bitkilərin böyüməsini mənfi təsir edə bilər. Bəzi bitkilər rutubətin yüksək olduğu mühitlərdə inkişaf etməyə çətinlik çəkir.";
+  } else {
+    humidityStatus = "Çox yüksək rutubət (90-100%) - Bitkilərin kök sistemi zədələnə bilər. Çox yüksək rütubət, bəzi bitkilərdə çürüməyə səbəb ola bilər.";
+  }
+
+  Serial.print("🌱 Rütubət: ");
+  Serial.print(h); Serial.print("% - ");
+  Serial.println(humidityStatus);
 
   // === Torpaq nəmlik səviyyəsi şərh edilir ===
   Serial.print("🌱 Torpaq nəmlik (ADC): ");
@@ -126,16 +142,14 @@ void loop() {
   } else if (pressure == 1013) {
     Serial.println("✅ Normal təzyiq — standart atmosfer təzyiqi");
   } else if (pressure > 1013 && pressure <= 1025) {
-    Serial.println("☀ Yüksək normal təzyiq — hava açıq və günəşli ola bilər");
-  } else if (pressure > 1025) {
-    Serial.println("☀🔥 Yüksək təzyiq — çox açıq hava, quraqlıq riski");
+    Serial.println("🌞 Yüksək təzyiq — yaxşı hava");
   } else {
-    Serial.println("❓ Naməlum təzyiq vəziyyəti");
+    Serial.println("⚠ Çox yüksək təzyiq — yağışsız");
   }
 
-  // === Qaz müqavimətinə əsasən hava keyfiyyəti ===
-  Serial.print("🌫 Qaz müqaviməti: ");
-  Serial.print(gasRes); Serial.println(" KOhms ");
+  // === Gas Resistance dəyərini Serial Monitor-da göstəririk ===
+  Serial.print("💨 Gas Resistance: ");
+  Serial.print(gasRes); Serial.print(" KOhm ");
 
   if (gasRes > 40) {
     Serial.println("✅ Hava çox təmizdir — rural (kənd) səviyyəsi");
@@ -151,23 +165,33 @@ void loop() {
     Serial.println("❓ Naməlum qaz müqaviməti dəyəri");
   }
 
-  // === JSON string hazırlanır ===
-  char payload[256];
-  sprintf(payload, PF, dhtTemp, dhtHum, soilValue, bmeTemp, bmeHum, pressure, gasRes, ortaTemp, ortaHum);
-
-  // === Məlumatı serverə POST request ilə göndərmək ===
+  // === Data göndərilməsi ===
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
+
+    // URL bağlantısı
     http.begin(SERVER_URL);
     http.addHeader("Content-Type", "application/json");
-    int httpResponseCode = http.POST(payload);  // POST request göndərilir
-    Serial.print("HTTP response code: ");
-    Serial.println(httpResponseCode);
-    http.end();  // Bağlantı bitir
+
+    // JSON payload
+    String payload = String("{\"temperature\": \"") + ortaTemp + String("\", \"humidity\": \"") + ortaHum + String("\", \"soil\": \"") + soilValue + String("\", \"bme_temperature\": \"") + bmeTemp + String("\", \"bme_humidity\": \"") + bmeHum + String("\", \"pressure\": \"") + pressure + String("\", \"gas_resistance\": \"") + gasRes + String("\"}");
+
+    // HTTP POST sorğusu göndərmək
+    int httpCode = http.POST(payload);
+
+    // Status kodunu Serial Monitor-da göstərmək
+    if (httpCode > 0) {
+      Serial.println("Məlumat göndərildi!");
+    } else {
+      Serial.println("HTTP sorğusu göndərilərkən xəta baş verdi!");
+    }
+
+    // Bağlantıyı kəsirik
+    http.end();
   } else {
-    Serial.println("WiFi bağlı deyil");
+    Serial.println("WiFi ilə bağlı problem var");
   }
 
-  // 5 saniyə gözləyirik, sonra yenidən oxumağa başlayırıq
-  delay(5000);
+  // 10 saniyəlik gözləmə
+  delay(10000); 
 }
